@@ -11,7 +11,9 @@ from tensorflow.keras.layers import Dense, SimpleRNN, LSTM, GRU, Conv1D, MaxPool
 from tensorflow.keras.optimizers import Adam
 import matplotlib.pyplot as plt
 
+# -----------------------------
 # Core functions
+# -----------------------------
 
 @st.cache_data
 def fetch_stock_data(ticker):
@@ -62,7 +64,7 @@ def predict_future(model, last_sequence, scaler, days=7):
     current_seq = last_sequence.copy()
 
     for _ in range(days):
-        pred = model.predict(current_seq.reshape(1, *current_seq.shape))[0, 0]
+        pred = model.predict(current_seq.reshape(1, *current_seq.shape), verbose=0)[0, 0]
         predictions.append(pred)
         current_seq = np.append(current_seq[1:], [[pred]], axis=0)
 
@@ -75,7 +77,7 @@ def run_model_pipeline(model_name, df):
     model = build_model(model_name, (X.shape[1], X.shape[2]))
     model.fit(X_train, y_train, epochs=10, batch_size=32, verbose=0)
 
-    y_pred = model.predict(X_test)
+    y_pred = model.predict(X_test, verbose=0)
     y_test_inv = scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
     y_pred_inv = scaler.inverse_transform(y_pred).flatten()
 
@@ -87,11 +89,21 @@ def run_model_pipeline(model_name, df):
 
     return {"MSE": mse, "MAE": mae, "Future 7 Days": future, "Actual": y_test_inv, "Pred": y_pred_inv}
 
-# ------------------------
-# Streamlit UI
-# ------------------------
+# Helper function to get next business days (skip Sat-Sun)
+def get_next_business_days(start_date, n_days):
+    days = []
+    current = start_date
+    while len(days) < n_days:
+        current += pd.Timedelta(days=1)
+        if current.weekday() < 5:  # Monday–Friday
+            days.append(current)
+    return pd.to_datetime(days)
 
-st.title("📈 Smart Stock Price Predictor")
+# -----------------------------
+# Streamlit UI
+# -----------------------------
+
+st.title("📈 Smart Stock Price Predictor (Weekends Skipped)")
 ticker = st.text_input("Enter Stock Ticker (e.g., AAPL, MSFT, TSLA):", "AAPL")
 
 if st.button("Predict"):
@@ -112,16 +124,17 @@ if st.button("Predict"):
         best_model = min(results, key=lambda m: results[m]["MSE"])
         st.subheader(f"✅ Best Model: {best_model} (MSE: {results[best_model]['MSE']:.4f})")
 
+        # Show actual vs predicted
         st.line_chart(pd.DataFrame({
             'Actual': results[best_model]["Actual"],
             'Predicted': results[best_model]["Pred"]
         }))
 
-        st.subheader("📅 Future 7-Day Stock Price Prediction")
+        # Future prediction (weekends skipped)
+        st.subheader("📅 Future 7-Day Stock Price Prediction (Weekends Skipped)")
         future_days = results[best_model]["Future 7 Days"]
-        future_df = pd.DataFrame(future_days, columns=["Predicted Price"])
-        future_df.index = pd.date_range(start=df.index[-1] + pd.Timedelta(days=1), periods=7)
+        future_dates = get_next_business_days(df.index[-1], len(future_days))
+        future_df = pd.DataFrame(future_days, index=future_dates, columns=["Predicted Price"])
         st.write(future_df)
 
         st.bar_chart(future_df)
-
