@@ -137,6 +137,9 @@ def main():
         start_date = df.index[-1].date()
         future_dates = get_next_7_weekdays(start_date)
 
+        # Convert future dates to datetime for plotting
+        future_dates = [datetime.strptime(str(date), '%Y-%m-%d').date() for date in future_dates]
+
         future_df = pd.DataFrame({"Date": future_dates, "Predicted Price": future_preds})
 
         st.subheader("📅 Future 7-Day Stock Price Prediction")
