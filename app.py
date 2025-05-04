@@ -79,13 +79,13 @@ def run_model_pipeline(model_name, df):
     y_test_inv = scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
     y_pred_inv = scaler.inverse_transform(y_pred).flatten()
 
-    mse = mean_squared_error(y_test_inv, y_pred_inv)
-    mae = mean_absolute_error(y_test_inv, y_pred_inv)
-
     last_sequence = X[-1]
     future = predict_future(model, last_sequence, scaler)
 
-    return {"MSE": mse, "MAE": mae, "Future 7 Days": future, "Actual": y_test_inv, "Pred": y_pred_inv}
+    return {"MSE": mean_squared_error(y_test_inv, y_pred_inv),
+            "MAE": mean_absolute_error(y_test_inv, y_pred_inv),
+            "Future 7 Days": future,
+            "Actual": y_test_inv, "Pred": y_pred_inv}
 
 # Helper function to get next business days (skip Sat-Sun)
 def get_next_business_days(start_date, n_days):
@@ -124,9 +124,12 @@ if st.button("Predict"):
 
         # Show actual vs predicted
         st.subheader("📊 Actual vs Predicted Prices (Including Future Prediction)")
-        all_actual = np.concatenate([df['Close'].values[-60:], results[best_model]["Future 7 Days"]])
+
+        # Combine actual and predicted values
+        all_actual = np.concatenate([np.array(df['Close'].values[-60:]), results[best_model]["Future 7 Days"]])
         all_predicted = np.concatenate([results[best_model]["Pred"], results[best_model]["Future 7 Days"]])
 
+        # Generate the dates for actual and predicted data
         all_dates = pd.to_datetime(df.index[-60:].append(get_next_business_days(df.index[-1], len(results[best_model]["Future 7 Days"]))))
         
         df_actual_predicted = pd.DataFrame({
