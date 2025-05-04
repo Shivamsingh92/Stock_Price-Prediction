@@ -1,5 +1,3 @@
-# stock_predictor_app.py
-
 import streamlit as st
 import yfinance as yf
 import numpy as np
@@ -125,10 +123,18 @@ if st.button("Predict"):
         st.subheader(f"✅ Best Model: {best_model} (MSE: {results[best_model]['MSE']:.4f})")
 
         # Show actual vs predicted
-        st.line_chart(pd.DataFrame({
-            'Actual': results[best_model]["Actual"],
-            'Predicted': results[best_model]["Pred"]
-        }))
+        st.subheader("📊 Actual vs Predicted Prices (Including Future Prediction)")
+        all_actual = np.concatenate([df['Close'].values[-60:], results[best_model]["Future 7 Days"]])
+        all_predicted = np.concatenate([results[best_model]["Pred"], results[best_model]["Future 7 Days"]])
+
+        all_dates = pd.to_datetime(df.index[-60:].append(get_next_business_days(df.index[-1], len(results[best_model]["Future 7 Days"]))))
+        
+        df_actual_predicted = pd.DataFrame({
+            'Actual': all_actual,
+            'Predicted': all_predicted
+        }, index=all_dates)
+
+        st.line_chart(df_actual_predicted)
 
         # Future prediction (weekends skipped)
         st.subheader("📅 Future 7-Day Stock Price Prediction (Weekends Skipped)")
