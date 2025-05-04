@@ -2,22 +2,23 @@ import streamlit as st
 import yfinance as yf
 import numpy as np
 import pandas as pd
+from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, SimpleRNN, LSTM, GRU, Conv1D, MaxPooling1D, Flatten, Dropout
 from tensorflow.keras.optimizers import Adam
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
-# -----------------------------
-# Core functions
-# -----------------------------
 
-@st.cache_data
+# Fetch stock data
 def fetch_stock_data(ticker):
     df = yf.download(ticker, period='1y')
     return df[['Close']]
 
+
+# Preprocess data
 def preprocess_data(data, time_step=60):
     scaler = MinMaxScaler()
     data_scaled = scaler.fit_transform(data)
@@ -27,21 +28,29 @@ def preprocess_data(data, time_step=60):
         X.append(data_scaled[i - time_step:i])
         y.append(data_scaled[i])
 
-    return np.array(X), np.array(y), scaler
+    X, y = np.array(X), np.array(y)
+    return X, y, scaler
 
+
+# Split data
 def split_data(X, y, split_ratio=0.8):
     split = int(len(X) * split_ratio)
     return X[:split], X[split:], y[:split], y[split:]
 
+
+# Build model
 def build_model(model_type, input_shape, units=50, dropout_rate=0.2, dense_units=50):
     model = Sequential()
 
     if model_type == "RNN":
-        model.add(SimpleRNN(units, input_shape=input_shape))
+        model.add(SimpleRNN(units, return_sequences=False, input_shape=input_shape))
+
     elif model_type == "LSTM":
-        model.add(LSTM(units, input_shape=input_shape))
+        model.add(LSTM(units, return_sequences=False, input_shape=input_shape))
+
     elif model_type == "GRU":
-        model.add(GRU(units, input_shape=input_shape))
+        model.add(GRU(units, return_sequences=False, input_shape=input_shape))
+
     elif model_type == "1D-CNN":
         model.add(Conv1D(filters=units, kernel_size=3, activation='relu', input_shape=input_shape))
         model.add(MaxPooling1D(pool_size=2))
@@ -53,9 +62,19 @@ def build_model(model_type, input_shape, units=50, dropout_rate=0.2, dense_units
     model.add(Dense(dense_units, activation='relu'))
     model.add(Dropout(dropout_rate))
     model.add(Dense(1))
-
     model.compile(optimizer=Adam(), loss='mean_squared_error')
     return model
+
+
+# Predict future 7 weekdays (skip weekends)
+def get_next_7_weekdays(start_date):
+    dates = []
+    while len(dates) < 7:
+        start_date += timedelta(days=1)
+        if start_date.weekday() < 5:  # 0-4 are Mon-Fri
+            dates.append(start_date)
+    return dates
+
 
 def predict_future(model, last_sequence, scaler, days=7):
     predictions = []
@@ -68,6 +87,8 @@ def predict_future(model, last_sequence, scaler, days=7):
 
     return scaler.inverse_transform(np.array(predictions).reshape(-1, 1)).flatten()
 
+
+# Run full pipeline
 def run_model_pipeline(model_name, df):
     X, y, scaler = preprocess_data(df)
     X_train, X_test, y_train, y_test = split_data(X, y)
@@ -75,7 +96,7 @@ def run_model_pipeline(model_name, df):
     model = build_model(model_name, (X.shape[1], X.shape[2]))
     model.fit(X_train, y_train, epochs=10, batch_size=32, verbose=0)
 
-    y_pred = model.predict(X_test, verbose=0)
+    y_pred = model.predict(X_test)
     y_test_inv = scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
     y_pred_inv = scaler.inverse_transform(y_pred).flatten()
 
@@ -85,62 +106,67 @@ def run_model_pipeline(model_name, df):
     last_sequence = X[-1]
     future = predict_future(model, last_sequence, scaler)
 
-    return {"MSE": mse, "MAE": mae, "Future 7 Days": future, "Actual": y_test_inv, "Pred": y_pred_inv}
+    return {
+        "MSE": mse,
+        "MAE": mae,
+        "Future 7 Days": future,
+        "actual": y_test_inv,
+        "predictions": y_pred_inv,
+        "model": model,
+        "scaler": scaler,
+        "last_sequence": last_sequence
+    }
 
-# Helper function to get next business days (skip Sat-Sun)
-def get_next_business_days(start_date, n_days):
-    days = []
-    current = start_date
-    while len(days) < n_days:
-        current += pd.Timedelta(days=1)
-        if current.weekday() < 5:  # Monday–Friday
-            days.append(current)
-    return pd.to_datetime(days)
 
-# -----------------------------
-# Streamlit UI
-# -----------------------------
+# Streamlit App
+def main():
+    st.title("📈 Stock Price Prediction (Next 7 Days excluding weekends)")
+    ticker = st.text_input("Enter stock ticker (e.g., AAPL, TSLA, MSFT)", value="AAPL")
 
-st.title("📈 Smart Stock Price Predictor (Weekends Skipped)")
-ticker = st.text_input("Enter Stock Ticker (e.g., AAPL, MSFT, TSLA):", "AAPL")
+    if st.button("Predict"):
+        df = fetch_stock_data(ticker)
 
-if st.button("Predict"):
-    df = fetch_stock_data(ticker)
-
-    if df.empty:
-        st.error("Invalid ticker or no data found.")
-    else:
-        st.success(f"Fetched data for {ticker}")
-
-        models = ["RNN", "LSTM", "GRU", "1D-CNN"]
         results = {}
+        for model_name in ["RNN", "LSTM", "GRU", "1D-CNN"]:
+            results[model_name] = run_model_pipeline(model_name, df)
 
-        with st.spinner("Training models..."):
-            for model_name in models:
-                results[model_name] = run_model_pipeline(model_name, df)
+        best_model = min(results, key=lambda model: results[model]["MSE"])
+        st.success(f"✅ Best model based on MSE: {best_model}")
 
-        best_model = min(results, key=lambda m: results[m]["MSE"])
-        st.subheader(f"✅ Best Model: {best_model} (MSE: {results[best_model]['MSE']:.4f})")
+        future_preds = results[best_model]["Future 7 Days"]
+        start_date = df.index[-1].date()
+        future_dates = get_next_7_weekdays(start_date)
 
-        # Show actual vs predicted
-        st.subheader("📊 Actual vs Predicted Prices (Including Future Prediction)")
-        all_actual = np.concatenate([df['Close'].values[-60:], results[best_model]["Future 7 Days"]])
-        all_predicted = np.concatenate([results[best_model]["Pred"], results[best_model]["Future 7 Days"]])
+        future_df = pd.DataFrame({"Date": future_dates, "Predicted Price": future_preds})
 
-        all_dates = pd.to_datetime(df.index[-60:].append(get_next_business_days(df.index[-1], len(results[best_model]["Future 7 Days"]))))
-        
-        df_actual_predicted = pd.DataFrame({
-            'Actual': all_actual,
-            'Predicted': all_predicted
-        }, index=all_dates)
+        st.subheader("📅 Future 7-Day Stock Price Prediction")
+        st.dataframe(future_df)
 
-        st.line_chart(df_actual_predicted)
+        # Plot actual vs predicted
+        st.subheader("📊 Actual vs Predicted (Test Data)")
+        y_test = results[best_model]["actual"]
+        y_pred = results[best_model]["predictions"]
+        plt.figure(figsize=(10, 5))
+        plt.plot(y_test, label="Actual", color="blue")
+        plt.plot(y_pred, label="Predicted", color="red", linestyle='--')
+        plt.title(f"{best_model} - Actual vs Predicted")
+        plt.xlabel("Time")
+        plt.ylabel("Stock Price")
+        plt.legend()
+        st.pyplot(plt)
 
-        # Future prediction (weekends skipped)
-        st.subheader("📅 Future 7-Day Stock Price Prediction (Weekends Skipped)")
-        future_days = results[best_model]["Future 7 Days"]
-        future_dates = get_next_business_days(df.index[-1], len(future_days))
-        future_df = pd.DataFrame(future_days, index=future_dates, columns=["Predicted Price"])
-        st.write(future_df)
+        # Plot future predictions
+        st.subheader("📉 Next 7 Business Days Forecast")
+        plt.figure(figsize=(10, 4))
+        plt.plot(future_dates, future_preds, marker='o', linestyle='-', color='purple')
+        plt.title(f"Future 7-Day Forecast ({best_model})")
+        plt.xlabel("Date")
+        plt.ylabel("Predicted Stock Price")
+        plt.grid(True)
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
+        plt.gcf().autofmt_xdate()
+        st.pyplot(plt)
 
-        st.bar_chart(future_df)
+
+if __name__ == "__main__":
+    main()
