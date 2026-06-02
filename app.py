@@ -212,12 +212,15 @@ def predict(model, X_np):
 @torch.no_grad()
 def predict_future(model, last_seq, scaler, days=7):
     model.eval()
-    seq, preds = last_seq.copy(), []
+    # Ensure (time_step, 1) float32 throughout — np.append loses shape/dtype
+    seq = last_seq.copy().astype(np.float32).reshape(-1, 1)  # (T, 1)
+    preds = []
     for _ in range(days):
-        x = torch.from_numpy(seq[np.newaxis]).to(DEVICE)
+        x = torch.from_numpy(seq[np.newaxis]).to(DEVICE)     # (1, T, 1)
         p = model(x).item()
         preds.append(p)
-        seq = np.append(seq[1:], [[p]], axis=0)
+        new_val = np.array([[p]], dtype=np.float32)           # (1, 1)
+        seq = np.concatenate([seq[1:], new_val], axis=0)      # (T, 1) preserved
     return scaler.inverse_transform(
         np.array(preds, dtype=np.float32).reshape(-1, 1)
     ).flatten()
