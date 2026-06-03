@@ -1,5 +1,5 @@
 # 📈 Stock Price Prediction using Deep Learning (RNN, LSTM, GRU, 1D-CNN)
-App_link- https://stockprice-prediction-a7xzhnoahzp35dkfryihkk.streamlit.app/
+App_link- https://stockprice-prediction-lanfdsbeszh58cnvzwdfze.streamlit.app/
 
 ## 🧠 Problem Statement
 
